@@ -5,8 +5,45 @@ import {
   Settings, CalendarRange, CalendarDays
 } from 'lucide-react';
 
+/* ---------- types ---------- */
+export interface Zone {
+  id: string;
+  name: string;
+  color: string;
+  low: string;
+  high: string;
+}
+
+export interface Run {
+  id: string;
+  date: string;
+  durations: Record<string, number>;
+}
+
+export interface DurationField {
+  min: string;
+  sec: string;
+}
+
+export interface FormState {
+  date: string;
+  durations: Record<string, DurationField>;
+}
+
+interface SpectrumProps {
+  zones: Zone[];
+  totals: Record<string, number>;
+  height?: number;
+  radius?: number;
+}
+
+interface ZoneBreakdownProps {
+  zones: Zone[];
+  totals: Record<string, number>;
+}
+
 /* ---------- defaults ---------- */
-const DEFAULT_ZONES = [
+const DEFAULT_ZONES: Zone[] = [
   { id: "z1", name: "Zone 1", color: "#64748b", low: "0",   high: "128" },
   { id: "z2", name: "Zone 2", color: "#4f8ef7", low: "129", high: "160" },
   { id: "z3", name: "Zone 3", color: "#22c55e", low: "161", high: "175" },
@@ -16,22 +53,22 @@ const DEFAULT_ZONES = [
 const ZONE_PALETTE = ["#38bdf8", "#34d399", "#fbbf24", "#fb923c", "#f43f5e", "#a78bfa", "#22d3ee", "#f472b6"];
 
 /* ---------- date + time helpers ---------- */
-const pad = (n) => String(n).padStart(2, "0");
-function parseDate(s) { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); }
-function toISO(d) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+const pad = (n: number) => String(n).padStart(2, "0");
+function parseDate(s: string) { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); }
+function toISO(d: Date) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
 function todayISO() { return toISO(new Date()); }
-function addDays(d, n) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() + n); return x; }
-function mondayOf(d) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); const dow = (x.getDay() + 6) % 7; x.setDate(x.getDate() - dow); return x; }
-function dayMonth(d) { return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
-function fmtDate(iso) { return parseDate(iso).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }); }
-function weekLabel(iso) { const m = parseDate(iso); return `${dayMonth(m)} \u2013 ${dayMonth(addDays(m, 6))}`; }
-function fmt(sec) {
+function addDays(d: Date, n: number) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() + n); return x; }
+function mondayOf(d: Date) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); const dow = (x.getDay() + 6) % 7; x.setDate(x.getDate() - dow); return x; }
+function dayMonth(d: Date) { return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
+function fmtDate(iso: string) { return parseDate(iso).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }); }
+function weekLabel(iso: string) { const m = parseDate(iso); return `${dayMonth(m)} \u2013 ${dayMonth(addDays(m, 6))}`; }
+function fmt(sec: number) {
   sec = Math.max(0, Math.round(sec));
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-function bpmText(z) {
+function bpmText(z: Zone) {
   if (z.low && z.high) return `${z.low}\u2013${z.high} bpm`;
   if (z.low) return `${z.low}+ bpm`;
   if (z.high) return `0\u2013${z.high} bpm`;
@@ -39,8 +76,8 @@ function bpmText(z) {
 }
 
 /* ---------- storage: Supabase cloud (primary) + on-device (fallback) ---------- */
-const SB_URL = import.meta.env.VITE_SUPABASE_URL;
-const SB_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const SB_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SB_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const SB_KV = `${SB_URL}/rest/v1/hr_kv`;
 const sbHeaders = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" };
 
@@ -48,13 +85,13 @@ async function cloudPing() {
   const r = await fetch(`${SB_KV}?select=key&limit=1`, { headers: sbHeaders });
   return r.ok;
 }
-async function cloudGet(key) {
+async function cloudGet(key: string) {
   const r = await fetch(`${SB_KV}?key=eq.${encodeURIComponent(key)}&select=value`, { headers: sbHeaders });
   if (!r.ok) throw new Error("cloud get failed");
   const rows = await r.json();
   return rows.length ? rows[0].value : null;
 }
-async function cloudSet(key, value) {
+async function cloudSet(key: string, value: any) {
   const r = await fetch(SB_KV, {
     method: "POST",
     headers: { ...sbHeaders, Prefer: "resolution=merge-duplicates,return=minimal" },
@@ -63,7 +100,7 @@ async function cloudSet(key, value) {
   if (!r.ok) throw new Error("cloud set failed");
 }
 
-async function localGet(key, fallback) {
+async function localGet(key: string, fallback: any) {
   try {
     if (typeof window !== "undefined" && window.localStorage) {
       const r = window.localStorage.getItem("hrz_" + key);
@@ -72,7 +109,7 @@ async function localGet(key, fallback) {
   } catch (e) { /* missing -> fallback */ }
   return fallback;
 }
-async function localSet(key, value) {
+async function localSet(key: string, value: any) {
   try {
     if (typeof window !== "undefined" && window.localStorage) {
       window.localStorage.setItem("hrz_" + key, JSON.stringify(value));
@@ -81,7 +118,7 @@ async function localSet(key, value) {
 }
 
 /* ---------- spectrum bar (the signature element) ---------- */
-function Spectrum({ zones, totals, height = 14, radius = 999 }) {
+function Spectrum({ zones, totals, height = 14, radius = 999 }: SpectrumProps) {
   const total = zones.reduce((s, z) => s + (totals[z.id] || 0), 0);
   return (
     <div className="spectrum" style={{ height, borderRadius: radius }}>
@@ -94,7 +131,7 @@ function Spectrum({ zones, totals, height = 14, radius = 999 }) {
   );
 }
 
-function ZoneBreakdown({ zones, totals }) {
+function ZoneBreakdown({ zones, totals }: ZoneBreakdownProps) {
   const total = zones.reduce((s, z) => s + (totals[z.id] || 0), 0);
   if (total <= 0) return null;
   return (
@@ -124,31 +161,31 @@ function ZoneBreakdown({ zones, totals }) {
 }
 
 function App() {
-  const [zones, setZones] = useState(DEFAULT_ZONES);
-  const [runs, setRuns] = useState([]);
+  const [zones, setZones] = useState<Zone[]>(DEFAULT_ZONES);
+  const [runs, setRuns] = useState<Run[]>([]);
   const [loaded, setLoaded] = useState(false);
 
-  const [mode, setMode] = useState("range"); // "range" | "week"
-  const [rangeStart, setRangeStart] = useState(null);
-  const [rangeEnd, setRangeEnd] = useState(null);
-  const [weekStart, setWeekStart] = useState(toISO(mondayOf(new Date())));
+  const [mode, setMode] = useState<"range" | "week">("range");
+  const [rangeStart, setRangeStart] = useState<string | null>(null);
+  const [rangeEnd, setRangeEnd] = useState<string | null>(null);
+  const [weekStart, setWeekStart] = useState<string>(toISO(mondayOf(new Date())));
 
-  const [form, setForm] = useState(() => ({ date: todayISO(), durations: {} }));
-  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState<FormState>(() => ({ date: todayISO(), durations: {} }));
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   const [showSettings, setShowSettings] = useState(false);
-  const [expandedId, setExpandedId] = useState(null);
-  const [confirmId, setConfirmId] = useState(null);
-  const [syncMode, setSyncMode] = useState("checking"); // checking | cloud | local
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [syncMode, setSyncMode] = useState<"checking" | "cloud" | "local">("checking");
 
-  const formRef = useRef(null);
-  const modeRef = useRef("local");
+  const formRef = useRef<HTMLElement>(null);
+  const modeRef = useRef<"cloud" | "local">("local");
 
   /* load: try cloud first, fall back to on-device storage */
   useEffect(() => {
     (async () => {
-      let currentMode = "local";
+      let currentMode: "cloud" | "local" = "local";
       try {
         if (await cloudPing()) {
           currentMode = "cloud";
@@ -171,7 +208,7 @@ function App() {
       const rs = Array.isArray(r) ? r : [];
       setZones(zs);
       setRuns(rs);
-      const dates = rs.map((x) => x.date).sort();
+      const dates = rs.map((x: Run) => x.date).sort();
       setRangeStart(dates[0] || todayISO());
       setRangeEnd(todayISO());
       setLoaded(true);
@@ -179,7 +216,7 @@ function App() {
   }, []);
 
   /* persist to the active backend; downgrade to local if a cloud write fails */
-  async function saveData(key, value) {
+  async function saveData(key: string, value: any) {
     if (modeRef.current === "cloud") {
       try { await cloudSet(key, value); return; }
       catch (e) { modeRef.current = "local"; setSyncMode("local"); }
@@ -194,7 +231,8 @@ function App() {
   const endISO = mode === "range" ? (rangeEnd || "9999-12-31") : toISO(addDays(parseDate(weekStart), 6));
 
   const agg = useMemo(() => {
-    const totals = {}; zones.forEach((z) => (totals[z.id] = 0));
+    const totals: Record<string, number> = {}; 
+    zones.forEach((z) => (totals[z.id] = 0));
     let count = 0;
     for (const run of runs) {
       if (run.date >= startISO && run.date <= endISO) {
@@ -208,10 +246,13 @@ function App() {
   const periodTotal = zones.reduce((s, z) => s + (agg.totals[z.id] || 0), 0);
 
   const weeks = useMemo(() => {
-    const map = {};
+    const map: Record<string, { count: number, totals: Record<string, number> }> = {};
     runs.forEach((r) => {
       const wk = toISO(mondayOf(parseDate(r.date)));
-      if (!map[wk]) { map[wk] = { totals: {}, count: 0 }; zones.forEach((z) => (map[wk].totals[z.id] = 0)); }
+      if (!map[wk]) { 
+        map[wk] = { totals: {}, count: 0 }; 
+        zones.forEach((z) => (map[wk].totals[z.id] = 0)); 
+      }
       map[wk].count++;
       zones.forEach((z) => (map[wk].totals[z.id] += r.durations[z.id] || 0));
     });
@@ -221,14 +262,15 @@ function App() {
   const sortedRuns = useMemo(() => [...runs].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)), [runs]);
 
   /* form helpers */
-  const dv = (zid) => form.durations[zid] || { min: "", sec: "" };
-  const setDur = (zid, field, val) =>
+  const dv = (zid: string) => form.durations[zid] || { min: "", sec: "" };
+  const setDur = (zid: string, field: "min" | "sec", val: string) =>
     setForm((f) => ({ ...f, durations: { ...f.durations, [zid]: { ...(f.durations[zid] || { min: "", sec: "" }), [field]: val.replace(/[^0-9]/g, "") } } }));
 
   function resetForm() { setForm({ date: todayISO(), durations: {} }); setEditingId(null); setError(""); }
 
   function saveRun() {
-    const durations = {}; let total = 0;
+    const durations: Record<string, number> = {}; 
+    let total = 0;
     zones.forEach((z) => {
       const f = dv(z.id);
       const s = (parseInt(f.min || "0", 10) || 0) * 60 + Math.min(59, parseInt(f.sec || "0", 10) || 0);
@@ -240,8 +282,8 @@ function App() {
     resetForm();
   }
 
-  function startEdit(run) {
-    const d = {};
+  function startEdit(run: Run) {
+    const d: Record<string, DurationField> = {};
     zones.forEach((z) => {
       const s = run.durations[z.id] || 0;
       d[z.id] = { min: s ? String(Math.floor(s / 60)) : "", sec: s ? String(s % 60) : "" };
@@ -252,11 +294,11 @@ function App() {
   }
 
   /* zone editing */
-  const updateZone = (id, patch) => setZones((zs) => zs.map((z) => (z.id === id ? { ...z, ...patch } : z)));
+  const updateZone = (id: string, patch: Partial<Zone>) => setZones((zs) => zs.map((z) => (z.id === id ? { ...z, ...patch } : z)));
   const addZone = () => setZones((zs) => [...zs, { id: uid(), name: `Zone ${zs.length + 1}`, color: ZONE_PALETTE[zs.length % ZONE_PALETTE.length], low: "", high: "" }]);
-  const removeZone = (id) => setZones((zs) => (zs.length > 1 ? zs.filter((z) => z.id !== id) : zs));
+  const removeZone = (id: string) => setZones((zs) => (zs.length > 1 ? zs.filter((z) => z.id !== id) : zs));
 
-  const setQuickRange = (days) => {
+  const setQuickRange = (days: number | "all") => {
     setRangeEnd(todayISO());
     if (days === "all") { const dates = runs.map((r) => r.date).sort(); setRangeStart(dates[0] || todayISO()); }
     else setRangeStart(toISO(addDays(new Date(), -days + 1)));
@@ -331,7 +373,7 @@ function App() {
                 <label>To <input className="input" type="date" value={rangeEnd || ""} onChange={(e) => setRangeEnd(e.target.value)} /></label>
               </div>
               <div className="quick">
-                {[["7d", 7], ["30d", 30], ["90d", 90], ["All", "all"]].map(([lbl, v]) => (
+                {([["7d", 7], ["30d", 30], ["90d", 90], ["All", "all"]] as const).map(([lbl, v]) => (
                   <button key={lbl} className="chip" onClick={() => setQuickRange(v)}>{lbl}</button>
                 ))}
               </div>
